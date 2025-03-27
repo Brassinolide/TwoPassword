@@ -1,5 +1,5 @@
 #include "memsafe.h"
-#include "setting.h"
+#include "config.h"
 
 byteptr make_byteptr(size_t total_size) {
     return byteptr(new uint8_t[total_size](), ZeroDeleter(total_size));
@@ -100,8 +100,17 @@ void disable_memfree() {
     InstallInlineHook(GetProcAddress(LoadLibraryW(L"ntdll.dll"), "RtlFreeHeap"), MyRtlFreeHeap);
 }
 
+std::wstring GetProgramDirectory_utf16() {
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    std::wstring fullPath(exePath);
+    std::wstring::size_type pos = fullPath.find_last_of(L"\\/");
+    return fullPath.substr(0, pos);
+}
+
+
 void safe_exit() {
-    std::wstring path = GetProgramDirectory_utf16() + L"\\SafeMemoryCleaner.exe";
+    std::wstring path = L"\"" + GetProgramDirectory_utf16() + L"\\SafeMemoryCleaner.exe\"";
     std::wstring parameters = std::to_wstring(GetCurrentProcessId());
 
     SHELLEXECUTEINFOW sei = { sizeof(sei) };

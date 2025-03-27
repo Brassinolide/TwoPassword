@@ -2,6 +2,7 @@ x64/
 .vs/
 TwoPassword/x64/
 TwoPassword/imgui.ini
+TwoPassword/config.json
 imgui.ini
 SafeMemoryCleaner/.vs/
 SafeMemoryCleaner/x64/

@@ -81,7 +81,6 @@ std::string winapi_get_last_error_utf8();
 std::string openssl_get_last_error_utf8();
 
 
-
 /*
 PasswordRecord ::= SEQUENCE {
     website UTF8String,

@@ -11,7 +11,7 @@
 #include "tpcs.h"
 #include "safekdf.h"
 #include "memsafe.h"
-#include "setting.h"
+#include "config.h"
 
 using namespace std;
 
@@ -423,7 +423,7 @@ bool RenderGUI() {
 
                 ImGui::SameLine();
                 static bool search_website = true;
-                ImGui::Checkbox("网站地址", &search_common_name);
+                ImGui::Checkbox("网站地址", &search_website);
 
                 ImGui::SameLine();
                 static bool search_username = false;
@@ -580,14 +580,16 @@ bool RenderGUI() {
 
                 static int memsafe = -1;
                 if (memsafe == -1) {
-                    memsafe = get_config_int(L"memsafe", 0);
+                    memsafe = config.config_get_int("memsafe", 0, 2, 0);
                 }
                 ImGui::Combo("内存安全选项", &memsafe, "无内存安全\0灵活\0严格\0\0");
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNone))
                     ImGui::SetTooltip("重启程序后生效");
 
                 if (ImGui::Button("保存")) {
-                    if (!set_config_int(L"memsafe", memsafe)) {
+                    config.config_set_int("memsafe", memsafe);
+
+                    if (!config.save_config_file()) {
                         ImMessageBox_error("保存失败", true);
                     }
                     else {
@@ -811,7 +813,7 @@ bool RenderGUI() {
     ::DestroyWindow(hwnd);
     ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
 
-    if (get_config_int(L"memsafe", 0) != 0) {
+    if (config.config_get_int("memsafe", 0, 2, 0) != 0) {
         safe_exit();
     }
 }
