@@ -1,6 +1,22 @@
 #include "memsafe.h"
 #include "config.h"
 
+void secure_erase_string(std::string& str) {
+    if (!str.empty()) {
+        memset(&str[0], 0, str.size());
+        str.clear();
+        str.shrink_to_fit();
+    }
+}
+
+void secure_erase_wstring(std::wstring& wstr) {
+    if (!wstr.empty()) {
+        memset(&wstr[0], 0, wstr.size() * sizeof(wchar_t));
+        wstr.clear();
+        wstr.shrink_to_fit();
+    }
+}
+
 byteptr make_byteptr(size_t total_size) {
     return byteptr(new uint8_t[total_size](), ZeroDeleter(total_size));
 }
@@ -87,6 +103,10 @@ BOOLEAN WINAPI MyRtlFreeHeap(PVOID HeapHandle, ULONG Flags, PVOID HeapBase) {
     return TRUE;
 }
 
+PVOID MyRtlDestroyHeap(PVOID HeapHandle) {
+    return NULL;
+}
+
 void disable_memfree() {
     InstallInlineHook(HeapFree, MyHeapFree);
     InstallInlineHook(VirtualFree, MyVirtualFree);
@@ -97,7 +117,13 @@ void disable_memfree() {
     InstallInlineHook(CoTaskMemFree, MyCoTaskMemFree);
     InstallInlineHook(free, Myfree);
     InstallInlineHook(SysFreeString, MySysFreeString);
-    InstallInlineHook(GetProcAddress(LoadLibraryW(L"ntdll.dll"), "RtlFreeHeap"), MyRtlFreeHeap);
+    HMODULE ntdll = LoadLibraryW(L"ntdll.dll");
+    if (ntdll) {
+        void* RtlFreeHeap_ptr = GetProcAddress(ntdll, "RtlFreeHeap");
+        if(RtlFreeHeap_ptr) InstallInlineHook(RtlFreeHeap_ptr, MyRtlFreeHeap);
+        void* RtlDestroyHeap_ptr = GetProcAddress(ntdll, "RtlDestroyHeap");
+        if (RtlDestroyHeap_ptr) InstallInlineHook(RtlDestroyHeap_ptr, MyRtlDestroyHeap);
+    }
 }
 
 std::wstring GetProgramDirectory_utf16() {

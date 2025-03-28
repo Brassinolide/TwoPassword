@@ -29,7 +29,7 @@ public:
     bool save_config_file() {
         try
         {
-            std::ofstream f("config.json");
+            std::ofstream f("config.json", std::ios::trunc);
             if (!f.good()) {
                 return false;
             }

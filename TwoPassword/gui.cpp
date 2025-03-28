@@ -7,10 +7,7 @@
 #include "imgui/imgui_impl_dx9.h"
 #include "imgui/imgui_impl_win32.h"
 #include "imgui/imgui_stdlib.h"
-#include "utfcpp/utf8.h"
 #include "tpcs.h"
-#include "safekdf.h"
-#include "memsafe.h"
 #include "config.h"
 
 using namespace std;
@@ -200,6 +197,28 @@ void ImMessageBox_error(const char* text, bool additional_winapi = false, bool a
     ImMessageBox(err.c_str(), caption);
 }
 
+namespace var {
+    namespace window {
+        bool about = false;
+        bool setting = false;
+        bool create_password_library = false;
+        bool password_generator = false;
+        bool passfile_generator = false;
+    };
+    namespace session {
+        bool opened = false;
+        bool exit_session = false;
+        string password_lib_path_utf8;
+        wstring password_lib_path_utf16;
+        uint8_t key[64];
+        PasswordLibrary* lib;
+        std::string password_utf8;
+        std::vector<std::string> passfile_utf8;
+    };
+
+};
+
+
 bool RenderGUI() {
     WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"TwoPassword", nullptr };
     ::RegisterClassExW(&wc);
@@ -277,20 +296,15 @@ bool RenderGUI() {
             ImGui::SetWindowPos(ImVec2(0, 0), ImGuiCond_Always);
             ImGui::SetWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y), ImGuiCond_Always);
 
-            static bool window_about = false;
-            static bool window_setting = false;
-            static bool window_create_password_library = false;
-            static bool window_password_generator = false;
-            static bool window_passfile_generator = false;
             if (ImGui::BeginMenuBar())
             {
                 if (ImGui::BeginMenu("TwoPassword"))
                 {
                     if (ImGui::MenuItem("设置")) {
-                        window_setting = true;
+                        var::window::setting = true;
                     }
                     if (ImGui::MenuItem("关于")) {
-                        window_about = true;
+                        var::window::about = true;
                     }
                     ImGui::Separator();
                     if (ImGui::MenuItem("安全退出")) {
@@ -301,30 +315,25 @@ bool RenderGUI() {
                 if (ImGui::BeginMenu("工具"))
                 {
                     if (ImGui::MenuItem("创建密码库")) {
-                        window_create_password_library = true;
+                        var::window::create_password_library = true;
                     }
                     ImGui::Separator();
                     if (ImGui::MenuItem("密码生成器")) {
-                        window_password_generator = true;
+                        var::window::password_generator = true;
                     }
                     if (ImGui::MenuItem("密码文件生成器")) {
-                        window_passfile_generator = true;
+                        var::window::passfile_generator = true;
                     }
                     ImGui::EndMenu();
                 }
                 ImGui::EndMenuBar();
             }
 
-            static string password_lib_path;
-            static bool opened = false;
-            static uint8_t key[64];
-            static PasswordLibrary* lib;
-            static std::string password;
-            static std::vector<std::string> passfile;
-            if (opened) {
-                ImGui::Text("当前密码库：%s", password_lib_path.c_str());
-                ImGui::Text("创建时间：%s", tpcs4_get_create_time_string(lib).c_str());
-                ImGui::Text("更新时间：%s", tpcs4_get_update_time_string(lib).c_str());
+            if (var::session::opened) {
+                ImGui::Text("当前密码库：%s", var::session::password_lib_path_utf8.c_str());
+                ImGui::Text("创建时间：%s", tpcs4_get_create_time_utc_iso8601(var::session::lib).c_str());
+                ImGui::Text("更新时间：%s", tpcs4_get_update_time_utc_iso8601(var::session::lib).c_str());
+                ImGui::Text("密码记录数：%d", tpcs4_get_records_size(var::session::lib));
                 if (ImGui::Button("添加")) {
                     ImGui::OpenPopup("add_password_record");
                 }
@@ -345,8 +354,8 @@ bool RenderGUI() {
                     static string password;
                     ImGui::InputText("*密码", &password);
 
-                    static string desc;
-                    ImGui::InputTextMultiline("备注", &desc);
+                    static string description;
+                    ImGui::InputTextMultiline("备注", &description);
 
                     do
                     {
@@ -355,15 +364,14 @@ bool RenderGUI() {
                                 ImMessageBox_error("必填项未填");
                                 break;
                             }
-                            PasswordRecord * rec = tpcs4_create_record(website, username, password, desc, common_name);
-                            if (!rec) {
+                            PasswordRecord * rec = tpcs4_create_record(website, username, password, description, common_name);
+                            if (!rec || !tpcs4_append_record(var::session::lib, rec)) {
                                 ImMessageBox_error("无法创建记录", false, true);
                                 break;
                             }
-                            tpcs4_insert_record(lib, rec);
 
                             secure_erase_string(common_name);
-                            secure_erase_string(desc);
+                            secure_erase_string(description);
                             secure_erase_string(password);
                             secure_erase_string(username);
                             secure_erase_string(website);
@@ -385,11 +393,8 @@ bool RenderGUI() {
                             break;
                         }
 
-                        wstring u16;
-                        utf8::utf8to16(password_lib_path.begin(), password_lib_path.end(), back_inserter(u16));
-                        
                         // 每次保存都用不同的盐，所以每次保存都需要派生一次密钥
-                        if (!tocs4_save_library_kdf(u16.c_str(), lib, key, passfile, password)) {
+                        if (!tocs4_save_library_kdf(var::session::password_lib_path_utf16.c_str(), var::session::lib, var::session::key, var::session::passfile_utf8, var::session::password_utf8)) {
                             ImMessageBox_error("无法保存密码库", true, true);
                             break;
                         }
@@ -400,17 +405,10 @@ bool RenderGUI() {
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNone))
                     ImGui::SetTooltip("会短暂卡顿，请耐心等待");
 
-                /*
                 ImGui::SameLine();
                 if (ImGui::Button("退出")) {
-                    memset(key, 0, 64);
-                    secure_erase_string(password);
-                    secure_erase_vector(passfile);
-                    PasswordLibrary_free(lib);
-                    lib = nullptr;
-                    opened = false;
+                    var::session::exit_session = true;
                 }
-                */
 
                 static string search;
                 ImGui::InputText("搜索", &search);
@@ -430,27 +428,32 @@ bool RenderGUI() {
                 ImGui::Checkbox("用户名", &search_username);
 
                 ImGui::SameLine();
-                static bool search_desc = false;
-                ImGui::Checkbox("备注", &search_desc);
+                static bool search_description = false;
+                ImGui::Checkbox("备注", &search_description);
 
                 static int selected = -1;
-                static int last_selected = -1;
+                static int last_selected = 0x7fffffff;
                 ImGui::BeginChild("left pane", ImVec2(200, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
                 
+                
+
                 std::vector<int> filtered_indices;
-                for (int i = 0; i < tpcs4_get_record_size(lib); i++) {
+                for (int i = 0; i < tpcs4_get_records_size(var::session::lib); i++) {
+                    string_PasswordRecord search_rec;
+                    tpcs4_get_record(var::session::lib, search_rec, i);
+
                     std::string to_search;
                     if (search_common_name) {
-                        to_search += tpcs4_get_common_name_string(lib, i);
+                        to_search += search_rec.common_name;
                     }
                     if (search_website) {
-                        to_search += tpcs4_get_website_string(lib, i);
+                        to_search += search_rec.website;
                     }
                     if (search_username) {
-                        to_search += tpcs4_get_username_string(lib, i);
+                        to_search += search_rec.username;
                     }
-                    if (search_desc) {
-                        to_search += tpcs4_get_description_string(lib, i);
+                    if (search_description) {
+                        to_search += search_rec.description;
                     }
 
                     std::transform(to_search.begin(), to_search.end(), to_search.begin(), ::tolower);
@@ -466,9 +469,10 @@ bool RenderGUI() {
                     int i = filtered_indices[display_id];
                     ImGui::PushID(display_id);
 
-                    std::string common_name = tpcs4_get_common_name_string(lib, i);
-                    std::string website = tpcs4_get_website_string(lib, i);
-                    const char* show_name = common_name.empty() ? website.c_str() : common_name.c_str();
+                    string_PasswordRecord display_rec;
+                    tpcs4_get_record(var::session::lib, display_rec, i);
+
+                    const char* show_name = display_rec.common_name.empty() ? display_rec.website.c_str() : display_rec.common_name.c_str();
 
                     if (ImGui::Selectable(show_name, selected == i)) {
                         selected = i;
@@ -479,7 +483,7 @@ bool RenderGUI() {
                         ImGui::Separator();
 
                         if (ImGui::MenuItem("删除")) {
-                            tpcs4_delete_record(lib, i);
+                            tpcs4_delete_record(var::session::lib, i);
                             selected = -1;
                             last_selected = 0x7fffffff;
                             ImGui::CloseCurrentPopup();
@@ -495,79 +499,86 @@ bool RenderGUI() {
                 ImGui::SameLine();
 
                 ImGui::BeginChild("item view", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()));
-                if (selected != -1 && selected < tpcs4_get_record_size(lib)) {
-                    static string website;
-                    static string username;
-                    static string password;
-                    static string description;
-                    static string common_name;
+                if (selected != -1 && selected < tpcs4_get_records_size(var::session::lib)) {
+                    static string_PasswordRecord selected_rec;
                     if (last_selected != selected) {
-                        website = tpcs4_get_website_string(lib, selected);
-                        username = tpcs4_get_username_string(lib, selected);
-                        password = tpcs4_get_password_string(lib, selected);
-                        description = tpcs4_get_description_string(lib, selected);
-                        common_name = tpcs4_get_common_name_string(lib, selected);
+                        tpcs4_get_record(var::session::lib, selected_rec, selected);
                         last_selected = selected;
                     }
 
-                    const char* show_name = common_name.empty() ? website.c_str() : common_name.c_str();
+                    const char* show_name = selected_rec.common_name.empty() ? selected_rec.website.c_str() : selected_rec.common_name.c_str();
                     ImGui::TextUnformatted(show_name);
 
                     ImGui::Separator();
 
                     static bool readonly = true;
                     ImGui::Checkbox("只读", &readonly);
-                    ImGui::InputText("友好名称", &common_name, readonly ? ImGuiInputTextFlags_ReadOnly : 0);
-                    ImGui::InputText("网站地址", &website, readonly ? ImGuiInputTextFlags_ReadOnly : 0);
-                    ImGui::InputText("用户名", &username, readonly ? ImGuiInputTextFlags_ReadOnly : 0);
-                    ImGui::InputText("密码", &password, readonly ? ImGuiInputTextFlags_ReadOnly : 0);
-                    ImGui::InputTextMultiline("备注", &description, ImVec2(0, 0), readonly ? ImGuiInputTextFlags_ReadOnly : 0);
-
-                    if (ImGui::Button("更新")) {
-                        tpcs4_update_website_string(lib, website, selected);
-                        tpcs4_update_usernam_string(lib, username, selected);
-                        tpcs4_update_password_string(lib, password, selected);
-                        tpcs4_update_description_string(lib, description, selected);
-                        tpcs4_update_common_name_string(lib, common_name, selected);
+                    ImGui::InputText("友好名称", &selected_rec.common_name, readonly ? ImGuiInputTextFlags_ReadOnly : 0);
+                    ImGui::InputText("网站地址", &selected_rec.website, readonly ? ImGuiInputTextFlags_ReadOnly : 0);
+                    ImGui::InputText("用户名", &selected_rec.username, readonly ? ImGuiInputTextFlags_ReadOnly : 0);
+                    ImGui::InputText("密码", &selected_rec.password, readonly ? ImGuiInputTextFlags_ReadOnly : 0);
+                    ImGui::InputTextMultiline("备注", &selected_rec.description, ImVec2(0, 0), readonly ? ImGuiInputTextFlags_ReadOnly : 0);
+                    
+                    if (!readonly) {
+                        if (ImGui::Button("更新")) {
+                            tpcs4_update_record(var::session::lib, selected_rec, selected);
+                        }
                     }
                 }
+
+                if (var::session::exit_session) {
+                    memset(var::session::key, 0 ,64);
+                    secure_erase_string(var::session::password_lib_path_utf8);
+                    secure_erase_wstring(var::session::password_lib_path_utf16);
+                    secure_erase_string(var::session::password_utf8);
+                    secure_erase_vector(var::session::passfile_utf8);
+                    PasswordLibrary_free(var::session::lib);
+
+                    secure_erase_string(search);
+                    selected = -1;
+                    last_selected = 0x7fffffff;
+
+                    var::session::opened = false;
+                    var::session::exit_session = false;
+                }
+
                 ImGui::EndChild();
             }
             else {
-                ImGui::InputText("密码库", &password_lib_path);
+                ImGui::InputText("密码库", &var::session::password_lib_path_utf8);
                 ImGui::SameLine();
                 if (ImGui::Button("选择")) {
                     std::string str = SelectFileToOpen_utf8();
                     if (str.length()) {
-                        password_lib_path = str;
+                        var::session::password_lib_path_utf8 = str;
+
+                        var::session::password_lib_path_utf16.clear();
+                        utf8::utf8to16(str.begin(), str.end(), back_inserter(var::session::password_lib_path_utf16));
                     }
                 }
 
                 ImGui::Separator();
 
                 static bool show_password = false;
-                
-                ImGui::InputText("密码", &password, show_password ? 0 : ImGuiInputTextFlags_Password);
+                ImGui::InputText("密码", &var::session::password_utf8, show_password ? 0 : ImGuiInputTextFlags_Password);
                 ImGui::Checkbox("显示密码", &show_password);
 
                 ImGui::Separator();
 
                 static int selected = -1;
-                imgui_passfile_selector(selected, passfile);
+                imgui_passfile_selector(selected, var::session::passfile_utf8);
 
                 ImGui::Separator();
 
                 do
                 {
                     if (ImGui::Button("打开", ImVec2(50, 50))) {
-                        wstring u16;
-                        utf8::utf8to16(password_lib_path.begin(), password_lib_path.end(), back_inserter(u16));
-                        lib = tpcs4_read_library_kdf(u16.c_str(), key, passfile, password);
-                        if (!lib) {
+                        var::session::lib = tpcs4_read_library_kdf(var::session::password_lib_path_utf16.c_str(), var::session::key, var::session::passfile_utf8, var::session::password_utf8);
+                        if (!var::session::lib) {
                             ImMessageBox_error("无法打开密码库", true, true);
                             break;
                         }
-                        opened = true;
+                        var::session::opened = true;
                     }
                 } while (false);
 
@@ -575,8 +586,8 @@ bool RenderGUI() {
                     ImGui::SetTooltip("会短暂卡顿，请耐心等待");
             }
 
-            if (window_setting) {
-                ImGui::Begin("设置", &window_setting, ImGuiWindowFlags_AlwaysAutoResize);
+            if (var::window::setting) {
+                ImGui::Begin("设置", &var::window::setting, ImGuiWindowFlags_AlwaysAutoResize);
 
                 static int memsafe = -1;
                 if (memsafe == -1) {
@@ -600,8 +611,8 @@ bool RenderGUI() {
                 ImGui::End();
             }
 
-            if (window_create_password_library) {
-                ImGui::Begin("创建密码库", &window_create_password_library, ImGuiWindowFlags_AlwaysAutoResize);
+            if (var::window::create_password_library) {
+                ImGui::Begin("创建密码库", &var::window::create_password_library, ImGuiWindowFlags_AlwaysAutoResize);
 
                 static std::string password;
                 static std::string repassword;
@@ -670,7 +681,8 @@ bool RenderGUI() {
                         secure_erase_vector(passfile);
 
                         ImMessageBox("密码库创建成功", "创建成功");
-                        window_create_password_library = false;
+
+                        var::window::create_password_library = false;
                     }
                 } while (false);
 
@@ -680,8 +692,8 @@ bool RenderGUI() {
                 ImGui::End();
             }
 
-            if (window_about) {
-                ImGui::Begin("关于", &window_about, ImGuiWindowFlags_AlwaysAutoResize);
+            if (var::window::about) {
+                ImGui::Begin("关于", &var::window::about, ImGuiWindowFlags_AlwaysAutoResize);
                 ImGui::TextUnformatted("TwoPassword | 安全的密码管理器");
                 ImGui::Separator();
                 ImGui::Text("程序版本：%s\nImGui版本：%s\nOpenSSL版本：%s", "0.0.1", IMGUI_VERSION, OpenSSL_version(OPENSSL_VERSION));
@@ -690,8 +702,8 @@ bool RenderGUI() {
                 ImGui::End();
             }
 
-            if (window_passfile_generator) {
-                ImGui::Begin("密码文件生成器", &window_passfile_generator, ImGuiWindowFlags_AlwaysAutoResize);
+            if (var::window::passfile_generator) {
+                ImGui::Begin("密码文件生成器", &var::window::passfile_generator, ImGuiWindowFlags_AlwaysAutoResize);
 
                 static int length = 1;
                 ImGui::SliderInt("生成数量", &length, 1, 100);
@@ -719,8 +731,8 @@ bool RenderGUI() {
                 ImGui::End();
             }
 
-            if (window_password_generator) {
-                ImGui::Begin("密码生成器", &window_password_generator, ImGuiWindowFlags_AlwaysAutoResize);
+            if (var::window::password_generator) {
+                ImGui::Begin("密码生成器", &var::window::password_generator, ImGuiWindowFlags_AlwaysAutoResize);
                 static bool alpha = true;
                 ImGui::Checkbox("字母", &alpha);
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNone))

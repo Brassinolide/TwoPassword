@@ -14,7 +14,7 @@ static EVP_CIPHER_CTX* _create_chacha20_poly1305_ctx(const uint8_t* key) {
         return nullptr;
     }
 
-    if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, 12, nullptr)) {
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, 12, nullptr) != 1) {
         EVP_CIPHER_CTX_free(ctx);
         return nullptr;
     }
@@ -50,7 +50,7 @@ static EVP_CIPHER_CTX* _create_aes_gcm_ctx(const uint8_t* key, int key_size) {
         return nullptr;
     }
 
-    if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, 12, nullptr)) {
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, 12, nullptr) != 1) {
         EVP_CIPHER_CTX_free(ctx);
         return nullptr;
     }
@@ -92,7 +92,9 @@ static bool _encrypt(EVP_CIPHER_CTX* ctx, uint8_t* in_data, uint8_t* out_data_op
     }
 
     if (out_authtag_opt) {
-        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, out_authtag_opt);
+        if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, out_authtag_opt) != 1) {
+            return false;
+        }
     }
     return true;
 }
@@ -130,7 +132,9 @@ static bool _decrypt(EVP_CIPHER_CTX* ctx, uint8_t* in_data, uint8_t* out_data_op
         if (!in_authtag) {
             return false;
         }
-        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, (void*)in_authtag);
+        if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, (void*)in_authtag) != 1) {
+            return false;
+        }
     }
 
     if (EVP_DecryptFinal_ex(ctx, (out_data_opt ? out_data_opt : in_data) + total_outl, &outl) != 1) {

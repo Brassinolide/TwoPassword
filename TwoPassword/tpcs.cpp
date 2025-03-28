@@ -113,6 +113,79 @@ TPCS2
 
 */
 
+bool safekdf(const uint8_t* in_data, size_t in_size, uint8_t* out_data, size_t out_size, const uint8_t* in_salt_1, const uint8_t* in_salt_2, const uint8_t* in_salt_3, size_t salt_size) {
+    if (!in_data || !in_size || !out_data || !out_size) {
+        return false;
+    }
+
+    uint8_t temp1[256] = { 0 };
+    uint8_t temp2[128] = { 0 };
+
+    if (PKCS5_PBKDF2_HMAC((const char*)in_data, in_size, in_salt_1, salt_size,
+#ifdef _DEBUG
+        1
+#else
+        600000
+#endif
+        , EVP_sha512(), sizeof temp1, temp1) != 1) {
+        return false;
+    }
+
+    if (PKCS5_PBKDF2_HMAC((const char*)temp1, sizeof temp1, in_salt_2, salt_size,
+#ifdef _DEBUG
+        1
+#else
+        600000
+#endif
+        , EVP_sha3_512(), sizeof temp2, temp2) != 1) {
+        return false;
+    }
+
+    memset(temp1, 0, sizeof temp1);
+
+    // 调试时不要在密钥派生上浪费太多时间
+
+#ifdef _DEBUG
+    uint32_t threads = 4, memcost = 65536, iterations = 1;
+#else
+    uint32_t threads = 4, memcost = 2097152, iterations = 10;
+#endif
+    if (OSSL_set_max_threads(NULL, threads) != 1) {
+        return false;
+    }
+
+    OSSL_PARAM params[7] = { 0 }, * p = params;
+    *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ITER, &iterations);
+    *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_THREADS, &threads);
+    *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_LANES, &threads);
+    *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_MEMCOST, &memcost);
+    *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT, (void*)in_salt_3, salt_size);
+    *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_PASSWORD, (void*)temp2, sizeof temp2);
+    *p++ = OSSL_PARAM_construct_end();
+
+    EVP_KDF* kdf = EVP_KDF_fetch(NULL, "ARGON2D", NULL);
+    if (!kdf) {
+        return false;
+    }
+
+    EVP_KDF_CTX* kctx = EVP_KDF_CTX_new(kdf);
+    if (!kctx) {
+        EVP_KDF_free(kdf);
+        return false;
+    }
+
+    bool success = (EVP_KDF_derive(kctx, out_data, out_size, params) == 1);
+
+    memset(temp1, 0, sizeof temp1);
+    memset(temp2, 0, sizeof temp2);
+
+    EVP_KDF_free(kdf);
+    EVP_KDF_CTX_free(kctx);
+    OSSL_set_max_threads(NULL, 0);
+
+    return success;
+}
+
 bool tpcs2_generate_salt_and_do_safekdf(const uint8_t* in_kdf_buffer, size_t kdf_buffer_size, uint8_t* out_key/*[64]*/, uint8_t* out_salt/*[48]*/) {
     if (!in_kdf_buffer || !kdf_buffer_size || !out_key || !out_salt) {
         return false;
@@ -214,8 +287,9 @@ ASN1_SEQUENCE(PasswordRecord) = {
     ASN1_SIMPLE(PasswordRecord, website, ASN1_UTF8STRING),
     ASN1_SIMPLE(PasswordRecord, username, ASN1_UTF8STRING),
     ASN1_SIMPLE(PasswordRecord, password, ASN1_UTF8STRING),
-    ASN1_OPT(PasswordRecord, description, ASN1_UTF8STRING),
-    ASN1_OPT(PasswordRecord, common_name, ASN1_UTF8STRING),
+    // ASN1_OPT
+    ASN1_SIMPLE(PasswordRecord, description, ASN1_UTF8STRING),
+    ASN1_SIMPLE(PasswordRecord, common_name, ASN1_UTF8STRING),
 } ASN1_SEQUENCE_END(PasswordRecord)
 IMPLEMENT_ASN1_FUNCTIONS(PasswordRecord)
 
@@ -233,14 +307,57 @@ PasswordLibrary* tpcs4_create_library() {
     }
 
     uint64_t time = get_utc_timestamp();
-    ASN1_INTEGER_set_uint64(lib->create_time, time);
-    ASN1_INTEGER_set_uint64(lib->update_time, time);
-    lib->records = sk_PasswordRecord_new_null();
+    if (ASN1_INTEGER_set_uint64(lib->create_time, time) != 1) {
+        PasswordLibrary_free(lib);
+        return nullptr;
+    }
+    if (ASN1_INTEGER_set_uint64(lib->update_time, time) != 1) {
+        PasswordLibrary_free(lib);
+        return nullptr;
+    }
 
     return lib;
 }
 
-bool tpcs4_insert_record(PasswordLibrary* lib, PasswordRecord* record) {
+// FIXME：OpenSSL的int溢出
+
+bool tpcs4_get_record(const PasswordLibrary* lib, string_PasswordRecord& out_srec, int idx) {
+    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
+    if (!record) {
+        return false;
+    }
+
+    out_srec.website.clear();
+    out_srec.username.clear();
+    out_srec.password.clear();
+    out_srec.description.clear();
+    out_srec.common_name.clear();
+
+    if (record->website && record->website->data) out_srec.website = (const char*)record->website->data;
+    if (record->username && record->username->data) out_srec.username = (const char*)record->username->data;
+    if (record->password && record->password->data) out_srec.password = (const char*)record->password->data;
+    if (record->description && record->description->data) out_srec.description = (const char*)record->description->data;
+    if (record->common_name && record->common_name->data) out_srec.common_name = (const char*)record->common_name->data;
+
+    return true;
+}
+
+bool tpcs4_update_record(const PasswordLibrary* lib, const string_PasswordRecord& srec, int idx) {
+    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
+    if (!record) {
+        return false;
+    }
+
+    return (
+        (ASN1_STRING_set(record->website, srec.website.c_str(), srec.website.length()) == 1) &&
+        (ASN1_STRING_set(record->username, srec.username.c_str(), srec.username.length()) == 1) &&
+        (ASN1_STRING_set(record->password, srec.password.c_str(), srec.password.length()) == 1) &&
+        (ASN1_STRING_set(record->description, srec.description.c_str(), srec.description.length()) == 1) &&
+        (ASN1_STRING_set(record->common_name, srec.common_name.c_str(), srec.common_name.length()) == 1)
+        );
+}
+
+bool tpcs4_append_record(PasswordLibrary* lib, PasswordRecord* record) {
     if (!lib || !record) {
         return false;
     }
@@ -250,204 +367,58 @@ bool tpcs4_insert_record(PasswordLibrary* lib, PasswordRecord* record) {
     return true;
 }
 
-struct string_PasswordRecord{
-    std::string website;
-    std::string username;
-    std::string password;
-    std::string description;
-    std::string common_name;
-};
-
-struct string_PasswordLibrary {
-    std::string create_time;
-    std::string update_time;
-    std::vector<string_PasswordRecord> records;
-};
-
-string_PasswordLibrary tpcs4_asn1_library_to_string(const PasswordLibrary* lib) {
-    string_PasswordLibrary slib;
-    slib.create_time = utc_timestamp_to_iso8601(asn1_get_uint64(lib->create_time));
-    slib.update_time = utc_timestamp_to_iso8601(asn1_get_uint64(lib->update_time));
-
-    for (size_t i = 0; i < sk_PasswordRecord_num(lib->records); ++i) {
-        string_PasswordRecord srec;
-
-        PasswordRecord* record = sk_PasswordRecord_value(lib->records, i);
-        if (!record) {
-            continue;
-        }
-
-        if (record->website) srec.website = (const char*)record->website->data;
-        if (record->username) srec.username = (const char*)record->username->data;
-        if (record->password) srec.password = (const char*)record->password->data;
-        if (record->description) srec.description = (const char*)record->description->data;
-        if (record->common_name) srec.common_name = (const char*)record->common_name->data;
-
-        slib.records.push_back(srec);
-    }
-
-    return slib;
-}
-
-std::string tpcs4_get_create_time_string(const PasswordLibrary* lib) {
-    return utc_timestamp_to_iso8601(asn1_get_uint64(lib->create_time));
-}
-
-std::string tpcs4_get_update_time_string(const PasswordLibrary* lib) {
-    return utc_timestamp_to_iso8601(asn1_get_uint64(lib->update_time));
-}
-
-bool tpcs4_update_time(PasswordLibrary* lib) {
-    return (ASN1_INTEGER_set_uint64(lib->update_time, get_utc_timestamp()) == 1);
-}
-
-// FIXME：OpenSSL的int溢出
-
-int tpcs4_get_record_size(const PasswordLibrary* lib) {
-    if (!lib) {
-        return 0;
-    }
-    return sk_PasswordRecord_num(lib->records);
-}
-
-void tpcs4_delete_record(PasswordLibrary* lib, int idx) {
-    if (!lib) {
-        return;
-    }
-    sk_PasswordRecord_delete(lib->records, idx);
-}
-
-std::string tpcs4_get_common_name_string(const PasswordLibrary* lib, int idx) {
-    if (!lib) {
-        return "";
-    }
-    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
-    if (!record || !record->common_name || !record->common_name->data) {
-        return "";
-    }
-    return (const char*)record->common_name->data;
-}
-
-bool tpcs4_update_common_name_string(const PasswordLibrary* lib, const std::string& common_name, int idx) {
-    if (!lib) {
-        return "";
-    }
-    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
-    if (!record || !record->common_name || !record->common_name->data) {
-        return "";
-    }
-    return (ASN1_STRING_set(record->common_name, common_name.c_str(), common_name.length()) == 1);
-}
-
-std::string tpcs4_get_description_string(const PasswordLibrary* lib, int idx) {
-    if (!lib) {
-        return "";
-    }
-    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
-    if (!record || !record->description || !record->description->data) {
-        return "";
-    }
-    return (const char*)record->description->data;
-}
-
-bool tpcs4_update_description_string(const PasswordLibrary* lib, const std::string& description, int idx) {
-    if (!lib) {
-        return false;
-    }
-    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
-    if (!record || !record->description || !record->description->data) {
-        return "";
-    }
-    return (ASN1_STRING_set(record->description, description.c_str(), description.length()) == 1);
-}
-
-std::string tpcs4_get_website_string(const PasswordLibrary* lib, int idx) {
-    if (!lib) {
-        return "";
-    }
-    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
-    if (!record || !record->website || !record->website->data) {
-        return "";
-    }
-    return (const char*)record->website->data;
-}
-
-bool tpcs4_update_website_string(const PasswordLibrary* lib, const std::string& website, int idx) {
-    if (!lib) {
-        return false;
-    }
-    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
-    if (!record || !record->website || !record->website->data) {
-        return "";
-    }
-    return (ASN1_STRING_set(record->website, website.c_str(), website.length()) == 1);
-}
-
-std::string tpcs4_get_username_string(const PasswordLibrary* lib, int idx) {
-    if (!lib) {
-        return "";
-    }
-    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
-    if (!record || !record->username || !record->username->data) {
-        return "";
-    }
-    return (const char*)record->username->data;
-}
-
-bool tpcs4_update_usernam_string(const PasswordLibrary* lib, const std::string& username, int idx) {
-    if (!lib) {
-        return false;
-    }
-    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
-    if (!record || !record->username || !record->username->data) {
-        return "";
-    }
-    return (ASN1_STRING_set(record->username, username.c_str(), username.length()) == 1);
-}
-
-std::string tpcs4_get_password_string(const PasswordLibrary* lib, int idx) {
-    if (!lib) {
-        return "";
-    }
-    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
-    if (!record || !record->password || !record->password->data) {
-        return "";
-    }
-    return (const char*)record->password->data;
-}
-
-bool tpcs4_update_password_string(const PasswordLibrary* lib, const std::string& password, int idx) {
-    if (!lib) {
-        return false;
-    }
-    PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
-    if (!record || !record->password || !record->password->data) {
-        return "";
-    }
-    return (ASN1_STRING_set(record->password, password.c_str(), password.length()) == 1);
-}
-
-PasswordRecord* tpcs4_create_record(const std::string& website,const std::string& username,const std::string& password,const std::string& description,const std::string& common_name) {
+PasswordRecord* tpcs4_create_record(const std::string& website, const std::string& username, const std::string& password, const std::string& description, const std::string& common_name) {
     PasswordRecord* record = PasswordRecord_new();
     if (!record) {
         return nullptr;
     }
 
-    ASN1_STRING_set(record->website, website.c_str(), website.length());
-    ASN1_STRING_set(record->username, username.c_str(), username.length());
-    ASN1_STRING_set(record->password, password.c_str(), password.length());
+    if ((ASN1_STRING_set(record->website, website.c_str(), website.length()) != 1) ||
+        (ASN1_STRING_set(record->username, username.c_str(), username.length()) != 1) ||
+        (ASN1_STRING_set(record->password, password.c_str(), password.length()) != 1) ||
+        (ASN1_STRING_set(record->description, description.c_str(), description.length()) != 1) ||
+        (ASN1_STRING_set(record->common_name, common_name.c_str(), common_name.length()) != 1)) {
 
-    if (!description.empty()) {
-        record->description = ASN1_UTF8STRING_new();
-        ASN1_STRING_set(record->description, description.c_str(), description.length());
-    }
-
-    if (!common_name.empty()) {
-        record->common_name = ASN1_UTF8STRING_new();
-        ASN1_STRING_set(record->common_name, common_name.c_str(), common_name.length());
+        PasswordRecord_free(record);
+        return nullptr;
     }
 
     return record;
+}
+
+void tpcs4_delete_record(PasswordLibrary* lib, int idx) {
+    if (!lib || !lib->records) {
+        return;
+    }
+    sk_PasswordRecord_delete(lib->records, idx);
+}
+
+int tpcs4_get_records_size(const PasswordLibrary* lib) {
+    if (!lib || !lib->records) {
+        return 0;
+    }
+    return sk_PasswordRecord_num(lib->records);
+}
+
+bool tpcs4_update_time(PasswordLibrary* lib) {
+    if (!lib || !lib->update_time) {
+        return "";
+    }
+    return (ASN1_INTEGER_set_uint64(lib->update_time, get_utc_timestamp()) == 1);
+}
+
+std::string tpcs4_get_create_time_utc_iso8601(const PasswordLibrary* lib) {
+    if (!lib || !lib->create_time) {
+        return "";
+    }
+    return utc_timestamp_to_iso8601(asn1_get_uint64(lib->create_time));
+}
+
+std::string tpcs4_get_update_time_utc_iso8601(const PasswordLibrary* lib) {
+    if (!lib || !lib->update_time) {
+        return "";
+    }
+    return utc_timestamp_to_iso8601(asn1_get_uint64(lib->update_time));
 }
 
 bool tpcs4_save_library(const wchar_t* path_utf16, PasswordLibrary* lib, const uint8_t* in_key/*[64]*/, const uint8_t* in_salt/*[48]*/) {
@@ -455,7 +426,9 @@ bool tpcs4_save_library(const wchar_t* path_utf16, PasswordLibrary* lib, const u
         return false;
     }
 
-    tpcs4_update_time(lib);
+    if (!tpcs4_update_time(lib)) {
+        return false;
+    }
 
     uint8_t* der = 0;
     int der_size = i2d_PasswordLibrary(lib, &der);

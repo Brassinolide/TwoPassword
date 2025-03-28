@@ -9,9 +9,13 @@
 #include <openssl/asn1.h>
 #include <openssl/asn1t.h>
 #include <openssl/err.h>
+#include <openssl/kdf.h>
+#include <openssl/evp.h>
+#include <openssl/params.h>
+#include <openssl/thread.h>
+#include <openssl/core_names.h>
 #include "literals.h"
 #include "aead.h"
-#include "safekdf.h"
 #include "memsafe.h"
 #include "utfcpp/utf8.h"
 
@@ -224,30 +228,28 @@ private:
     int _pos, _totalsize;
 };
 
+struct string_PasswordRecord {
+    std::string website;
+    std::string username;
+    std::string password;
+    std::string description;
+    std::string common_name;
+};
+
 PasswordLibrary* tpcs4_create_library();
-bool tpcs4_insert_record(PasswordLibrary* lib, PasswordRecord* record);
+
+int tpcs4_get_records_size(const PasswordLibrary* lib);
+
+bool tpcs4_append_record(PasswordLibrary* lib, PasswordRecord* record);
 PasswordRecord* tpcs4_create_record(const std::string& website, const std::string& username, const std::string& password, const std::string& description = "", const std::string& common_name = "");
+bool tpcs4_get_record(const PasswordLibrary* lib, string_PasswordRecord& out_srec, int idx);
+bool tpcs4_update_record(const PasswordLibrary* lib, const string_PasswordRecord& srec, int idx);
+void tpcs4_delete_record(PasswordLibrary* lib, int idx);
+
+bool tpcs4_update_time(PasswordLibrary* lib);
+std::string tpcs4_get_create_time_utc_iso8601(const PasswordLibrary* lib);
+std::string tpcs4_get_update_time_utc_iso8601(const PasswordLibrary* lib);
 
 bool tpcs4_save_library(const wchar_t* path_utf16, PasswordLibrary* lib, const uint8_t* in_key/*[64]*/, const uint8_t* in_salt/*[48]*/);
 bool tocs4_save_library_kdf(const wchar_t* path_utf16, PasswordLibrary* lib, uint8_t* out_key_opt/*[64]*/, const std::vector<std::string>& passfile_list_utf8, const std::string& password_utf8);
 PasswordLibrary* tpcs4_read_library_kdf(const wchar_t* path_utf16, uint8_t* out_key_opt/*[64]*/, const std::vector<std::string>& passfile_list_utf8, const std::string& password_utf8);
-
-uint64_t asn1_get_uint64(const ASN1_INTEGER* a);
-std::string utc_timestamp_to_iso8601(uint64_t t);
-
-int tpcs4_get_record_size(const PasswordLibrary* lib);
-void tpcs4_delete_record(PasswordLibrary* lib, int idx);
-std::string tpcs4_get_create_time_string(const PasswordLibrary* lib);
-std::string tpcs4_get_update_time_string(const PasswordLibrary* lib);
-bool tpcs4_update_time(PasswordLibrary* lib);
-std::string tpcs4_get_common_name_string(const PasswordLibrary* lib, int idx);
-bool tpcs4_update_common_name_string(const PasswordLibrary* lib, const std::string& common_name, int idx);
-std::string tpcs4_get_description_string(const PasswordLibrary* lib, int idx);
-bool tpcs4_update_description_string(const PasswordLibrary* lib, const std::string& description, int idx);
-std::string tpcs4_get_website_string(const PasswordLibrary* lib, int idx);
-bool tpcs4_update_website_string(const PasswordLibrary* lib, const std::string& website, int idx);
-std::string tpcs4_get_username_string(const PasswordLibrary* lib, int idx);
-bool tpcs4_update_usernam_string(const PasswordLibrary* lib, const std::string& username, int idx);
-std::string tpcs4_get_password_string(const PasswordLibrary* lib, int idx);
-bool tpcs4_update_password_string(const PasswordLibrary* lib, const std::string& password, int idx);
-

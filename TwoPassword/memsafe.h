@@ -6,7 +6,7 @@
 #include <windows.h>
 
 template <typename T>
-static void secure_erase_vector(std::vector<T>& vec) {
+void secure_erase_vector(std::vector<T>& vec) {
     if (!vec.empty()) {
         memset(vec.data(), 0, vec.size() * sizeof(T));
         vec.clear();
@@ -21,13 +21,8 @@ void secure_erase_array(std::array<T, N>& arr) {
     }
 }
 
-static void secure_erase_string(std::string& str) {
-    if (!str.empty()) {
-        memset(&str[0], 0, str.size());
-        str.clear();
-        str.shrink_to_fit();
-    }
-}
+void secure_erase_string(std::string& str);
+void secure_erase_wstring(std::wstring& wstr);
 
 struct ZeroDeleter {
     void operator()(uint8_t* ptr) const {
