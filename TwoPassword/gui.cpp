@@ -7,6 +7,7 @@
 #include "imgui/imgui_impl_dx9.h"
 #include "imgui/imgui_impl_win32.h"
 #include "imgui/imgui_stdlib.h"
+#include "vivoSans-Light.h"
 #include "tpcs.h"
 #include "config.h"
 
@@ -206,18 +207,68 @@ namespace var {
         bool passfile_generator = false;
     };
     namespace session {
+        namespace add_record {
+            string common_name;
+            string website;
+            string username;
+            string password;
+            string description;
+            void safe_clean() {
+                secure_erase_string(common_name);
+                secure_erase_string(website);
+                secure_erase_string(username);
+                secure_erase_string(password);
+                secure_erase_string(description);
+            }
+        };
+
+        namespace search_record {
+            string search;
+            bool search_common_name = true;
+            bool search_website = true;
+            bool search_username = false;
+            bool search_description = false;
+            int selected = -1;
+            int last_selected = 0x7fffffff;
+
+            void safe_clean() {
+                secure_erase_string(search);
+
+                selected = -1;
+                last_selected = 0x7fffffff;
+
+                search_common_name = true;
+                search_website = true;
+                search_username = false;
+                search_description = false;
+            }
+        };
+
         bool opened = false;
-        bool exit_session = false;
+        bool to_exit_session = false;
         string password_lib_path_utf8;
         wstring password_lib_path_utf16;
         uint8_t key[64];
         PasswordLibrary* lib;
         std::string password_utf8;
         std::vector<std::string> passfile_utf8;
+
+        void exit_session() {
+            memset(var::session::key, 0, 64);
+            secure_erase_string(var::session::password_lib_path_utf8);
+            secure_erase_wstring(var::session::password_lib_path_utf16);
+            secure_erase_string(var::session::password_utf8);
+            secure_erase_vector(var::session::passfile_utf8);
+            PasswordLibrary_free(var::session::lib);
+
+            var::session::add_record::safe_clean();
+            var::session::search_record::safe_clean();
+
+            var::session::opened = false;
+            var::session::to_exit_session = false;
+        }
     };
-
 };
-
 
 bool RenderGUI() {
     WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"TwoPassword", nullptr };
@@ -248,7 +299,24 @@ bool RenderGUI() {
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX9_Init(g_pd3dDevice);
 
-    ImFont* font = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\msyh.ttc", 19.0f, 0, io.Fonts->GetGlyphRangesChineseFull());
+    // AI给出的字体优化方案，如果在你的计算机上出现了问题（比如模糊、过小、过大等）请提issue
+
+    ImFontConfig fontConfig;
+    fontConfig.RasterizerMultiply = 1.2f; // 增强对比度，减少模糊感
+    fontConfig.OversampleH = 3;   // 水平过采样，保持抗锯齿，默认值 3
+    fontConfig.OversampleV = 1;   // 垂直过采样，默认值 1
+    fontConfig.PixelSnapH = false; // 不强制像素对齐，保留抗锯齿平滑性
+
+    // 计算字体大小
+    float baseFontSize = 16.0f; // 基础字体大小
+    float scale = io.DisplayFramebufferScale.x; // 获取 DPI 缩放比例
+    float fontSize = baseFontSize * scale; // 根据 DPI 调整
+    fontSize = max(std::round(fontSize), 18.0f); // 最小 18.0f 并四舍五入到整数
+
+    // 加载字体
+    io.Fonts->Clear(); // 清空之前的字体（如果需要动态调整）
+    io.Fonts->AddFontFromMemoryCompressedTTF(font_vivoSans_Light, font_vivoSans_Light_size, fontSize, &fontConfig, io.Fonts->GetGlyphRangesChineseFull());
+    io.Fonts->Build(); // 构建字体
 
     bool show_demo_window = true;
     bool show_another_window = false;
@@ -340,41 +408,28 @@ bool RenderGUI() {
 
                 if (ImGui::BeginPopup("add_password_record"))
                 {
-                    static string common_name;
-                    ImGui::InputText("友好名称", &common_name);
+                    ImGui::InputText("友好名称", &var::session::add_record::common_name);
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNone))
                         ImGui::SetTooltip("友好名称的显示优先级大于网站地址");
-
-                    static string website;
-                    ImGui::InputText("*网站地址", &website);
-
-                    static string username;
-                    ImGui::InputText("*用户名", &username);
-
-                    static string password;
-                    ImGui::InputText("*密码", &password);
-
-                    static string description;
-                    ImGui::InputTextMultiline("备注", &description);
+                    ImGui::InputText("*网站地址", &var::session::add_record::website);
+                    ImGui::InputText("*用户名", &var::session::add_record::username);
+                    ImGui::InputText("*密码", &var::session::add_record::password);
+                    ImGui::InputTextMultiline("备注", &var::session::add_record::description);
 
                     do
                     {
                         if (ImGui::Button("添加")) {
-                            if (website.empty() || username.empty() || password.empty()) {
+                            if (var::session::add_record::website.empty() || var::session::add_record::username.empty() || var::session::add_record::password.empty()) {
                                 ImMessageBox_error("必填项未填");
                                 break;
                             }
-                            PasswordRecord * rec = tpcs4_create_record(website, username, password, description, common_name);
+                            PasswordRecord * rec = tpcs4_create_record(var::session::add_record::website, var::session::add_record::username, var::session::add_record::password, var::session::add_record::description, var::session::add_record::common_name);
                             if (!rec || !tpcs4_append_record(var::session::lib, rec)) {
                                 ImMessageBox_error("无法创建记录", false, true);
                                 break;
                             }
 
-                            secure_erase_string(common_name);
-                            secure_erase_string(description);
-                            secure_erase_string(password);
-                            secure_erase_string(username);
-                            secure_erase_string(website);
+                            var::session::add_record::safe_clean();
 
                             ImGui::CloseCurrentPopup();
                         }
@@ -407,35 +462,21 @@ bool RenderGUI() {
 
                 ImGui::SameLine();
                 if (ImGui::Button("退出")) {
-                    var::session::exit_session = true;
+                    var::session::to_exit_session = true;
                 }
 
-                static string search;
-                ImGui::InputText("搜索", &search);
-
+                ImGui::InputText("搜索", &var::session::search_record::search);
                 ImGui::TextUnformatted("搜索范围：");
-
                 ImGui::SameLine();
-                static bool search_common_name = true;
-                ImGui::Checkbox("友好名称", &search_common_name);
-
+                ImGui::Checkbox("友好名称", &var::session::search_record::search_common_name);
                 ImGui::SameLine();
-                static bool search_website = true;
-                ImGui::Checkbox("网站地址", &search_website);
-
+                ImGui::Checkbox("网站地址", &var::session::search_record::search_website);
                 ImGui::SameLine();
-                static bool search_username = false;
-                ImGui::Checkbox("用户名", &search_username);
-
+                ImGui::Checkbox("用户名", &var::session::search_record::search_username);
                 ImGui::SameLine();
-                static bool search_description = false;
-                ImGui::Checkbox("备注", &search_description);
+                ImGui::Checkbox("备注", &var::session::search_record::search_description);
 
-                static int selected = -1;
-                static int last_selected = 0x7fffffff;
                 ImGui::BeginChild("left pane", ImVec2(200, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
-                
-                
 
                 std::vector<int> filtered_indices;
                 for (int i = 0; i < tpcs4_get_records_size(var::session::lib); i++) {
@@ -443,24 +484,24 @@ bool RenderGUI() {
                     tpcs4_get_record(var::session::lib, search_rec, i);
 
                     std::string to_search;
-                    if (search_common_name) {
+                    if (var::session::search_record::search_common_name) {
                         to_search += search_rec.common_name;
                     }
-                    if (search_website) {
+                    if (var::session::search_record::search_website) {
                         to_search += search_rec.website;
                     }
-                    if (search_username) {
+                    if (var::session::search_record::search_username) {
                         to_search += search_rec.username;
                     }
-                    if (search_description) {
+                    if (var::session::search_record::search_description) {
                         to_search += search_rec.description;
                     }
 
                     std::transform(to_search.begin(), to_search.end(), to_search.begin(), ::tolower);
-                    std::string search_lower = search;
+                    std::string search_lower = var::session::search_record::search;
                     std::transform(search_lower.begin(), search_lower.end(), search_lower.begin(), ::tolower);
 
-                    if (search.empty() || to_search.find(search_lower) != std::string::npos) {
+                    if (var::session::search_record::search.empty() || to_search.find(search_lower) != std::string::npos) {
                         filtered_indices.push_back(i);
                     }
                 }
@@ -474,8 +515,8 @@ bool RenderGUI() {
 
                     const char* show_name = display_rec.common_name.empty() ? display_rec.website.c_str() : display_rec.common_name.c_str();
 
-                    if (ImGui::Selectable(show_name, selected == i)) {
-                        selected = i;
+                    if (ImGui::Selectable(show_name, var::session::search_record::selected == i)) {
+                        var::session::search_record::selected = i;
                     }
 
                     if (ImGui::BeginPopupContextItem()) {
@@ -484,8 +525,8 @@ bool RenderGUI() {
 
                         if (ImGui::MenuItem("删除")) {
                             tpcs4_delete_record(var::session::lib, i);
-                            selected = -1;
-                            last_selected = 0x7fffffff;
+                            var::session::search_record::selected = -1;
+                            var::session::search_record::last_selected = 0x7fffffff;
                             ImGui::CloseCurrentPopup();
                         }
 
@@ -499,11 +540,11 @@ bool RenderGUI() {
                 ImGui::SameLine();
 
                 ImGui::BeginChild("item view", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()));
-                if (selected != -1 && selected < tpcs4_get_records_size(var::session::lib)) {
+                if (var::session::search_record::selected != -1 && var::session::search_record::selected < tpcs4_get_records_size(var::session::lib)) {
                     static string_PasswordRecord selected_rec;
-                    if (last_selected != selected) {
-                        tpcs4_get_record(var::session::lib, selected_rec, selected);
-                        last_selected = selected;
+                    if (var::session::search_record::last_selected != var::session::search_record::selected) {
+                        tpcs4_get_record(var::session::lib, selected_rec, var::session::search_record::selected);
+                        var::session::search_record::last_selected = var::session::search_record::selected;
                     }
 
                     const char* show_name = selected_rec.common_name.empty() ? selected_rec.website.c_str() : selected_rec.common_name.c_str();
@@ -521,25 +562,13 @@ bool RenderGUI() {
                     
                     if (!readonly) {
                         if (ImGui::Button("更新")) {
-                            tpcs4_update_record(var::session::lib, selected_rec, selected);
+                            tpcs4_update_record(var::session::lib, selected_rec, var::session::search_record::selected);
                         }
                     }
                 }
 
-                if (var::session::exit_session) {
-                    memset(var::session::key, 0 ,64);
-                    secure_erase_string(var::session::password_lib_path_utf8);
-                    secure_erase_wstring(var::session::password_lib_path_utf16);
-                    secure_erase_string(var::session::password_utf8);
-                    secure_erase_vector(var::session::passfile_utf8);
-                    PasswordLibrary_free(var::session::lib);
-
-                    secure_erase_string(search);
-                    selected = -1;
-                    last_selected = 0x7fffffff;
-
-                    var::session::opened = false;
-                    var::session::exit_session = false;
+                if (var::session::to_exit_session) {
+                    var::session::exit_session();
                 }
 
                 ImGui::EndChild();
