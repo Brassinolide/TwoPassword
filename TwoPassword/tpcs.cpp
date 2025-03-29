@@ -319,6 +319,14 @@ PasswordLibrary* tpcs4_create_library() {
     return lib;
 }
 
+void secure_erase_string_PasswordRecord(string_PasswordRecord& srec) {
+    secure_erase_string(srec.website);
+    secure_erase_string(srec.username);
+    secure_erase_string(srec.password);
+    secure_erase_string(srec.description);
+    secure_erase_string(srec.common_name);
+}
+
 // FIXME£ºOpenSSLµÄintÒç³ö
 
 bool tpcs4_get_record(const PasswordLibrary* lib, string_PasswordRecord& out_srec, int idx) {
@@ -338,7 +346,7 @@ bool tpcs4_get_record(const PasswordLibrary* lib, string_PasswordRecord& out_sre
     if (record->password && record->password->data) out_srec.password = (const char*)record->password->data;
     if (record->description && record->description->data) out_srec.description = (const char*)record->description->data;
     if (record->common_name && record->common_name->data) out_srec.common_name = (const char*)record->common_name->data;
-
+   
     return true;
 }
 

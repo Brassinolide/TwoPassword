@@ -53,7 +53,7 @@ struct deleter_HANDLE {
         }
     }
 };
-using auto_HANDLE = std::unique_ptr<void, deleter_HANDLE>;
+using auto_HANDLE = std::unique_ptr<std::remove_pointer_t<HANDLE>, deleter_HANDLE>;
 
 
 void disable_memfree();

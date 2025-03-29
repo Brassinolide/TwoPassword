@@ -3,6 +3,10 @@
 #include "config.h"
 #pragma comment( linker, "/subsystem:\"windows\" /entry:\"mainCRTStartup\"" )
 
+#ifndef _WIN64
+#error 不再维护32位
+#endif
+
 int main() {
 	config.load_config_file();
 

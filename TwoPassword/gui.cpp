@@ -223,7 +223,7 @@ namespace var {
         };
 
         namespace search_record {
-            string search;
+            string search_keyword;
             bool search_common_name = true;
             bool search_website = true;
             bool search_username = false;
@@ -232,7 +232,7 @@ namespace var {
             int last_selected = 0x7fffffff;
 
             void safe_clean() {
-                secure_erase_string(search);
+                secure_erase_string(search_keyword);
 
                 selected = -1;
                 last_selected = 0x7fffffff;
@@ -254,18 +254,18 @@ namespace var {
         std::vector<std::string> passfile_utf8;
 
         void exit_session() {
-            memset(var::session::key, 0, 64);
-            secure_erase_string(var::session::password_lib_path_utf8);
-            secure_erase_wstring(var::session::password_lib_path_utf16);
-            secure_erase_string(var::session::password_utf8);
-            secure_erase_vector(var::session::passfile_utf8);
-            PasswordLibrary_free(var::session::lib);
+            memset(key, 0, 64);
+            secure_erase_string(password_lib_path_utf8);
+            secure_erase_wstring(password_lib_path_utf16);
+            secure_erase_string(password_utf8);
+            secure_erase_vector(passfile_utf8);
+            PasswordLibrary_free(lib);
 
-            var::session::add_record::safe_clean();
-            var::session::search_record::safe_clean();
+            add_record::safe_clean();
+            search_record::safe_clean();
 
-            var::session::opened = false;
-            var::session::to_exit_session = false;
+            opened = false;
+            to_exit_session = false;
         }
     };
 };
@@ -302,24 +302,20 @@ bool RenderGUI() {
     // AI给出的字体优化方案，如果在你的计算机上出现了问题（比如模糊、过小、过大等）请提issue
 
     ImFontConfig fontConfig;
-    fontConfig.RasterizerMultiply = 1.2f; // 增强对比度，减少模糊感
-    fontConfig.OversampleH = 3;   // 水平过采样，保持抗锯齿，默认值 3
-    fontConfig.OversampleV = 1;   // 垂直过采样，默认值 1
-    fontConfig.PixelSnapH = false; // 不强制像素对齐，保留抗锯齿平滑性
+    fontConfig.RasterizerMultiply = 1.1f;
+    fontConfig.OversampleH = 2;
+    fontConfig.OversampleV = 2;
+    fontConfig.PixelSnapH = false;
 
-    // 计算字体大小
-    float baseFontSize = 16.0f; // 基础字体大小
-    float scale = io.DisplayFramebufferScale.x; // 获取 DPI 缩放比例
-    float fontSize = baseFontSize * scale; // 根据 DPI 调整
-    fontSize = max(std::round(fontSize), 18.0f); // 最小 18.0f 并四舍五入到整数
+    float baseFontSize = 16.0f;
+    float scale = io.DisplayFramebufferScale.x;
+    float fontSize = baseFontSize * scale;
+    fontSize = max(std::round(fontSize), 18.0f);
 
-    // 加载字体
-    io.Fonts->Clear(); // 清空之前的字体（如果需要动态调整）
+    io.Fonts->Clear();
     io.Fonts->AddFontFromMemoryCompressedTTF(font_vivoSans_Light, font_vivoSans_Light_size, fontSize, &fontConfig, io.Fonts->GetGlyphRangesChineseFull());
-    io.Fonts->Build(); // 构建字体
+    io.Fonts->Build();
 
-    bool show_demo_window = true;
-    bool show_another_window = false;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
     bool done = false;
@@ -465,7 +461,7 @@ bool RenderGUI() {
                     var::session::to_exit_session = true;
                 }
 
-                ImGui::InputText("搜索", &var::session::search_record::search);
+                ImGui::InputText("搜索", &var::session::search_record::search_keyword);
                 ImGui::TextUnformatted("搜索范围：");
                 ImGui::SameLine();
                 ImGui::Checkbox("友好名称", &var::session::search_record::search_common_name);
@@ -483,27 +479,28 @@ bool RenderGUI() {
                     string_PasswordRecord search_rec;
                     tpcs4_get_record(var::session::lib, search_rec, i);
 
-                    std::string to_search;
+                    std::string search_data;
                     if (var::session::search_record::search_common_name) {
-                        to_search += search_rec.common_name;
+                        search_data += search_rec.common_name;
                     }
                     if (var::session::search_record::search_website) {
-                        to_search += search_rec.website;
+                        search_data += search_rec.website;
                     }
                     if (var::session::search_record::search_username) {
-                        to_search += search_rec.username;
+                        search_data += search_rec.username;
                     }
                     if (var::session::search_record::search_description) {
-                        to_search += search_rec.description;
+                        search_data += search_rec.description;
                     }
 
-                    std::transform(to_search.begin(), to_search.end(), to_search.begin(), ::tolower);
-                    std::string search_lower = var::session::search_record::search;
-                    std::transform(search_lower.begin(), search_lower.end(), search_lower.begin(), ::tolower);
+                    std::transform(search_data.begin(), search_data.end(), search_data.begin(), ::tolower);
+                    std::transform(var::session::search_record::search_keyword.begin(), var::session::search_record::search_keyword.end(), var::session::search_record::search_keyword.begin(), ::tolower);
 
-                    if (var::session::search_record::search.empty() || to_search.find(search_lower) != std::string::npos) {
+                    if (var::session::search_record::search_keyword.empty() || search_data.find(var::session::search_record::search_keyword) != std::string::npos) {
                         filtered_indices.push_back(i);
                     }
+                    secure_erase_string(search_data);
+                    secure_erase_string_PasswordRecord(search_rec);
                 }
 
                 for (int display_id = 0; display_id < filtered_indices.size(); display_id++) {
@@ -532,6 +529,8 @@ bool RenderGUI() {
 
                         ImGui::EndPopup();
                     }
+
+                    secure_erase_string_PasswordRecord(display_rec);
 
                     ImGui::PopID();
                 }

@@ -134,7 +134,6 @@ std::wstring GetProgramDirectory_utf16() {
     return fullPath.substr(0, pos);
 }
 
-
 void safe_exit() {
     std::wstring path = L"\"" + GetProgramDirectory_utf16() + L"\\SafeMemoryCleaner.exe\"";
     std::wstring parameters = std::to_wstring(GetCurrentProcessId());

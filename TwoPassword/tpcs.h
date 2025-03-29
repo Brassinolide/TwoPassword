@@ -235,6 +235,7 @@ struct string_PasswordRecord {
     std::string description;
     std::string common_name;
 };
+void secure_erase_string_PasswordRecord(string_PasswordRecord& srec);
 
 PasswordLibrary* tpcs4_create_library();
 
