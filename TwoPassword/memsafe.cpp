@@ -1,4 +1,4 @@
-#include "memsafe.h"
+ï»¿#include "memsafe.h"
 #include "config.h"
 
 void secure_erase_string(std::string& str) {
@@ -148,9 +148,9 @@ void safe_exit() {
     if (ShellExecuteExW(&sei) && sei.hProcess) {
         WaitForSingleObject(sei.hProcess, INFINITE);
         CloseHandle(sei.hProcess);
-        MessageBoxW(0, L"SafeMemoryCleaner·¢ÉúÄÚ²¿´íÎó£¬Î´Õı³£½áÊø±¾³ÌĞò", L"¾¯¸æ", 0);
+        MessageBoxW(0, L"SafeMemoryCleanerå‘ç”Ÿå†…éƒ¨é”™è¯¯ï¼Œæœªæ­£å¸¸ç»“æŸæœ¬ç¨‹åº", L"è­¦å‘Š", 0);
     }
     else {
-        MessageBoxW(0, L"SafeMemoryCleanerÎ´Õı³£Æô¶¯£¬Çë¼ì²éÂ·¾¶¼°È¨ÏŞ", L"¾¯¸æ", 0);
+        MessageBoxW(0, L"SafeMemoryCleaneræœªæ­£å¸¸å¯åŠ¨ï¼Œè¯·æ£€æŸ¥è·¯å¾„åŠæƒé™", L"è­¦å‘Š", 0);
     }
 }

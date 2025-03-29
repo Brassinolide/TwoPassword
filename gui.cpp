@@ -1,38 +1,56 @@
-﻿#include "imgui/imgui.h"
-#include "imgui/imgui_stdlib.h"
-#include "imgui/imgui_impl_glfw.h"
-#include "imgui/imgui_impl_opengl3.h"
-#define GL_SILENCE_DEPRECATION
-#if defined(IMGUI_IMPL_OPENGL_ES2)
-    #include <GLES2/gl2.h>
-#endif
-#include <GLFW/glfw3.h>
-
-#include <string>
+﻿#pragma execution_character_set("utf-8")
+#include <d3d9.h>
 #include <array>
+#include <shlobj.h>
+#include <algorithm>
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_dx9.h"
+#include "imgui/imgui_impl_win32.h"
+#include "imgui/imgui_stdlib.h"
+#include "vivoSans-Light.h"
 #include "tpcs.h"
 #include "config.h"
-#include "gui.h"
-#include "vivoSans-Light.h"
 
-#ifdef _WIN32
+using namespace std;
 
-    #define GLFW_EXPOSE_NATIVE_WIN32
-    #include <GLFW/glfw3native.h>
+#define RGBA_TO_IMVEC4(r, g, b, a) ImVec4((float)r / 255.0f, (float)g / 255.0f, (float)b / 255.0f, (float)a / 255.0f)
 
-    #include <windows.h>
-    #include <shlobj.h>
+static LPDIRECT3D9              g_pD3D = nullptr;
+static LPDIRECT3DDEVICE9        g_pd3dDevice = nullptr;
+static bool                     g_DeviceLost = false;
+static UINT                     g_ResizeWidth = 0, g_ResizeHeight = 0;
+static D3DPRESENT_PARAMETERS    g_d3dpp = {};
 
-    #pragma execution_character_set("utf-8")
-    #pragma comment( linker, "/subsystem:\"windows\" /entry:\"mainCRTStartup\"" )
+bool CreateDeviceD3D(HWND hWnd);
+void CleanupDeviceD3D();
+void ResetDevice();
+LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-    #ifndef _WIN64
-        #error 不再维护32位
-    #endif
+static double shannon_entropy(const uint8_t* data, size_t size) {
+    if (!data || !size) {
+        return 0.0;
+    }
 
-static std::string SelectFileToOpen_utf8() {
+    std::array<size_t, 256> frequency = { 0 };
+    for (size_t i = 0; i < size; ++i) {
+        frequency[data[i]]++;
+    }
+
+    double entropy = 0.0;
+    for (size_t count : frequency) {
+        if (count > 0) {
+            double probability = static_cast<double>(count) / size;
+            entropy -= probability * log2(probability);
+        }
+    }
+
+    secure_erase_array(frequency);
+    return entropy;
+}
+
+static std::string SelectFileToOpen_utf8(){
     OPENFILENAMEW ofn = { sizeof(ofn) };
-    wchar_t szFile[MAX_PATH] = { 0 };
+    wchar_t szFile[MAX_PATH] = {0};
     ofn.hwndOwner = NULL;
     ofn.lpstrFile = szFile;
     ofn.lpstrFile[0] = '\0';
@@ -44,7 +62,7 @@ static std::string SelectFileToOpen_utf8() {
     ofn.lpstrInitialDir = NULL;
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
 
-    if (GetOpenFileNameW(&ofn) == TRUE) {
+    if (GetOpenFileNameW(&ofn) == TRUE){
         int size_needed = WideCharToMultiByte(CP_UTF8, 0, ofn.lpstrFile, -1, 0, 0, 0, 0);
         std::string utf8(size_needed, 0);
         WideCharToMultiByte(CP_UTF8, 0, ofn.lpstrFile, -1, &utf8[0], size_needed, 0, 0);
@@ -94,34 +112,6 @@ static std::wstring SelectDirectory_utf16() {
         CoTaskMemFree(pidl);
     }
     return L"";
-}
-
-#else
-    #error 目前仅支持windows系统
-#endif
-
-using namespace std;
-
-static double shannon_entropy(const uint8_t* data, size_t size) {
-    if (!data || !size) {
-        return 0.0;
-    }
-
-    std::array<size_t, 256> frequency = { 0 };
-    for (size_t i = 0; i < size; ++i) {
-        frequency[data[i]]++;
-    }
-
-    double entropy = 0.0;
-    for (size_t count : frequency) {
-        if (count > 0) {
-            double probability = static_cast<double>(count) / size;
-            entropy -= probability * log2(probability);
-        }
-    }
-
-    secure_erase_array(frequency);
-    return entropy;
 }
 
 void imgui_passfile_selector(int& selected, std::vector<std::string>& passfile) {
@@ -280,56 +270,24 @@ namespace var {
     };
 };
 
-static void glfw_error_callback(int error, const char* description) {
-    fprintf(stderr, "GLFW Error %d: %s\n", error, description);
-}
-
 bool RenderGUI() {
-    glfwSetErrorCallback(glfw_error_callback);
-    if (!glfwInit()) {
+    WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"TwoPassword", nullptr };
+    ::RegisterClassExW(&wc);
+    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"TwoPassword", WS_OVERLAPPEDWINDOW, 100, 100, 1280, 800, nullptr, nullptr, wc.hInstance, nullptr);
+
+#ifndef _DEBUG
+    SetWindowDisplayAffinity(hwnd, WDA_MONITOR);
+#endif 
+
+    if (!CreateDeviceD3D(hwnd))
+    {
+        CleanupDeviceD3D();
+        ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
         return false;
     }
 
-#if defined(IMGUI_IMPL_OPENGL_ES2)
-    // GL ES 2.0 + GLSL 100 (WebGL 1.0)
-    const char* glsl_version = "#version 100";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
-#elif defined(IMGUI_IMPL_OPENGL_ES3)
-    // GL ES 3.0 + GLSL 300 es (WebGL 2.0)
-    const char* glsl_version = "#version 300 es";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
-#elif defined(__APPLE__)
-    // GL 3.2 + GLSL 150
-    const char* glsl_version = "#version 150";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
-#else
-    // GL 3.0 + GLSL 130
-    const char* glsl_version = "#version 130";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-    //glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
-    //glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // 3.0+ only
-#endif
-
-    GLFWwindow* window = glfwCreateWindow(1898, 1144, "TwoPassword", nullptr, nullptr);
-    if (window == nullptr) {
-        return false;
-    }
-
-    // 窗口反截图
-#if defined(_WIN32) && !defined(_DEBUG)
-    SetWindowDisplayAffinity(glfwGetWin32Window(window), WDA_MONITOR);
-#endif
-   
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
+    ::ShowWindow(hwnd, SW_SHOWDEFAULT);
+    ::UpdateWindow(hwnd);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -338,28 +296,60 @@ bool RenderGUI() {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
     ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init(glsl_version);
+    ImGui_ImplWin32_Init(hwnd);
+    ImGui_ImplDX9_Init(g_pd3dDevice);
+
+    // AI给出的字体优化方案，如果在你的计算机上出现了问题（比如模糊、过小、过大等）请提issue
+
+    ImFontConfig fontConfig;
+    fontConfig.RasterizerMultiply = 1.1f;
+    fontConfig.OversampleH = 2;
+    fontConfig.OversampleV = 2;
+    fontConfig.PixelSnapH = false;
 
     io.Fonts->Clear();
-
-    ImFont* font = io.Fonts->AddFontFromMemoryCompressedTTF(font_vivoSans_Light, font_vivoSans_Light_size, 25.0f * io.DisplayFramebufferScale.y, nullptr, io.Fonts->GetGlyphRangesChineseFull());
-    if (!font) {
-        return false;
-    }
+    io.Fonts->AddFontFromMemoryCompressedTTF(font_vivoSans_Light, font_vivoSans_Light_size, std::max(std::round(16.0f * io.DisplayFramebufferScale.x), 18.0f), &fontConfig, io.Fonts->GetGlyphRangesChineseFull());
     io.Fonts->Build();
 
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
-        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0) {
-            ImGui_ImplGlfw_Sleep(10);
-            continue;
+    bool done = false;
+    while (!done) {
+        MSG msg;
+        while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE))
+        {
+            ::TranslateMessage(&msg);
+            ::DispatchMessage(&msg);
+            if (msg.message == WM_QUIT)
+                done = true;
         }
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
+        if (done)
+            break;
+
+        if (g_DeviceLost)
+        {
+            HRESULT hr = g_pd3dDevice->TestCooperativeLevel();
+            if (hr == D3DERR_DEVICELOST)
+            {
+                ::Sleep(10);
+                continue;
+            }
+            if (hr == D3DERR_DEVICENOTRESET)
+                ResetDevice();
+            g_DeviceLost = false;
+        }
+
+        if (g_ResizeWidth != 0 && g_ResizeHeight != 0) {
+            g_d3dpp.BackBufferWidth = g_ResizeWidth;
+            g_d3dpp.BackBufferHeight = g_ResizeHeight;
+            g_ResizeWidth = g_ResizeHeight = 0;
+            ResetDevice();
+        }
+
+        ImGui_ImplDX9_NewFrame();
+        ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
+
         {
             ImGui::Begin("HashMe", 0, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar);
             ImGui::SetWindowPos(ImVec2(0, 0), ImGuiCond_Always);
@@ -424,7 +414,7 @@ bool RenderGUI() {
                                 ImMessageBox_error("必填项未填");
                                 break;
                             }
-                            PasswordRecord* rec = tpcs4_create_record(var::session::add_record::website, var::session::add_record::username, var::session::add_record::password, var::session::add_record::description, var::session::add_record::common_name);
+                            PasswordRecord * rec = tpcs4_create_record(var::session::add_record::website, var::session::add_record::username, var::session::add_record::password, var::session::add_record::description, var::session::add_record::common_name);
                             if (!rec || !tpcs4_append_record(var::session::lib, rec)) {
                                 ImMessageBox_error("无法创建记录", false, true);
                                 break;
@@ -563,7 +553,7 @@ bool RenderGUI() {
                     ImGui::InputText("用户名", &selected_rec.username, readonly ? ImGuiInputTextFlags_ReadOnly : 0);
                     ImGui::InputText("密码", &selected_rec.password, readonly ? ImGuiInputTextFlags_ReadOnly : 0);
                     ImGui::InputTextMultiline("备注", &selected_rec.description, ImVec2(0, 0), readonly ? ImGuiInputTextFlags_ReadOnly : 0);
-
+                    
                     if (!readonly) {
                         if (ImGui::Button("更新")) {
                             tpcs4_update_record(var::session::lib, selected_rec, var::session::search_record::selected);
@@ -835,21 +825,85 @@ bool RenderGUI() {
             ImGui::End();
         }
 
-        ImGui::Render();
-        int display_w, display_h;
-        glfwGetFramebufferSize(window, &display_w, &display_h);
-        glViewport(0, 0, display_w, display_h);
-        glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        glfwSwapBuffers(window);
+        ImGui::EndFrame();
+        g_pd3dDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
+        g_pd3dDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+        D3DCOLOR clear_col_dx = D3DCOLOR_RGBA((int)(clear_color.x * clear_color.w * 255.0f), (int)(clear_color.y * clear_color.w * 255.0f), (int)(clear_color.z * clear_color.w * 255.0f), (int)(clear_color.w * 255.0f));
+        g_pd3dDevice->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, clear_col_dx, 1.0f, 0);
+        if (g_pd3dDevice->BeginScene() >= 0) {
+            ImGui::Render();
+            ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+            g_pd3dDevice->EndScene();
+        }
+        HRESULT result = g_pd3dDevice->Present(nullptr, nullptr, nullptr, nullptr);
+        if (result == D3DERR_DEVICELOST)
+            g_DeviceLost = true;
     }
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
+
+    ImGui_ImplDX9_Shutdown();
+    ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
+    CleanupDeviceD3D();
+    ::DestroyWindow(hwnd);
+    ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    if (config.config_get_int("memsafe", 0, 2, 0) != 0) {
+        safe_exit();
+    }
+}
 
-    return 0;
+bool CreateDeviceD3D(HWND hWnd) {
+    if ((g_pD3D = Direct3DCreate9(D3D_SDK_VERSION)) == nullptr)
+        return false;
+
+    ZeroMemory(&g_d3dpp, sizeof(g_d3dpp));
+    g_d3dpp.Windowed = TRUE;
+    g_d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    g_d3dpp.BackBufferFormat = D3DFMT_UNKNOWN;
+    g_d3dpp.EnableAutoDepthStencil = TRUE;
+    g_d3dpp.AutoDepthStencilFormat = D3DFMT_D16;
+    g_d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
+    if (g_pD3D->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd, D3DCREATE_HARDWARE_VERTEXPROCESSING, &g_d3dpp, &g_pd3dDevice) < 0)
+        return false;
+
+    return true;
+}
+
+void CleanupDeviceD3D() {
+    if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = nullptr; }
+    if (g_pD3D) { g_pD3D->Release(); g_pD3D = nullptr; }
+}
+
+void ResetDevice() {
+    ImGui_ImplDX9_InvalidateDeviceObjects();
+    HRESULT hr = g_pd3dDevice->Reset(&g_d3dpp);
+    if (hr == D3DERR_INVALIDCALL)
+        IM_ASSERT(0);
+    ImGui_ImplDX9_CreateDeviceObjects();
+}
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+        return true;
+
+    switch (msg)
+    {
+    case WM_SIZE:
+        if (wParam == SIZE_MINIMIZED)
+            return 0;
+        g_ResizeWidth = (UINT)LOWORD(lParam);
+        g_ResizeHeight = (UINT)HIWORD(lParam);
+        return 0;
+    case WM_SYSCOMMAND:
+        if ((wParam & 0xfff0) == SC_KEYMENU)
+            return 0;
+        break;
+    case WM_DESTROY:
+        ::PostQuitMessage(0);
+        return 0;
+    }
+    return ::DefWindowProcW(hWnd, msg, wParam, lParam);
 }

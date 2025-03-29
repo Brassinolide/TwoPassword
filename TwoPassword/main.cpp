@@ -1,11 +1,6 @@
-#include "gui.h"
+Ôªø#include "gui.h"
 #include "memsafe.h"
 #include "config.h"
-#pragma comment( linker, "/subsystem:\"windows\" /entry:\"mainCRTStartup\"" )
-
-#ifndef _WIN64
-#error ≤ª‘ŸŒ¨ª§32Œª
-#endif
 
 int main() {
 	config.load_config_file();

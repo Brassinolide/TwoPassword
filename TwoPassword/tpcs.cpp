@@ -1,4 +1,4 @@
-#include "tpcs.h"
+ï»¿#include "tpcs.h"
 
 /*
 
@@ -143,7 +143,7 @@ bool safekdf(const uint8_t* in_data, size_t in_size, uint8_t* out_data, size_t o
 
     memset(temp1, 0, sizeof temp1);
 
-    // µ÷ÊÔÊ±²»ÒªÔÚÃÜÔ¿ÅÉÉúÉÏÀË·ÑÌ«¶àÊ±¼ä
+    // è°ƒè¯•æ—¶ä¸è¦åœ¨å¯†é’¥æ´¾ç”Ÿä¸Šæµªè´¹å¤ªå¤šæ—¶é—´
 
 #ifdef _DEBUG
     uint32_t threads = 4, memcost = 65536, iterations = 1;
@@ -241,7 +241,7 @@ size_t tpcs3_encode(byteptr& out, const std::vector<std::string>& passfile_list_
     uint8_t* password_ptr = out.get();
     uint8_t* passfile_ptr = out.get() + password_size;
 
-    // ÕâÀïµÄ´úÂë½ö¼æÈİĞ¡¶ËÆ½Ì¨
+    // è¿™é‡Œçš„ä»£ç ä»…å…¼å®¹å°ç«¯å¹³å°
 
     std::vector<uint32_t> password_utf32;
     utf8::utf8to32(password_utf8.begin(), password_utf8.end(), back_inserter(password_utf32));
@@ -256,7 +256,7 @@ size_t tpcs3_encode(byteptr& out, const std::vector<std::string>& passfile_list_
         std::u16string u16;
         utf8::utf8to16(passfile.begin(), passfile.end(), std::back_inserter(u16));
 
-        // ÉèÖÃ FILE_FLAG_NO_BUFFERING ±ÜÃâÔÚ²Ù×÷ÏµÍ³ÄÚ´æÖĞ»º´æ
+        // è®¾ç½® FILE_FLAG_NO_BUFFERING é¿å…åœ¨æ“ä½œç³»ç»Ÿå†…å­˜ä¸­ç¼“å­˜
         HANDLE hFile = CreateFileW((LPCWSTR)u16.c_str(), GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, 0);
         if (hFile == INVALID_HANDLE_VALUE) {
             out = nullptr;
@@ -327,7 +327,7 @@ void secure_erase_string_PasswordRecord(string_PasswordRecord& srec) {
     secure_erase_string(srec.common_name);
 }
 
-// FIXME£ºOpenSSLµÄintÒç³ö
+// FIXMEï¼šOpenSSLçš„intæº¢å‡º
 
 bool tpcs4_get_record(const PasswordLibrary* lib, string_PasswordRecord& out_srec, int idx) {
     PasswordRecord* record = sk_PasswordRecord_value(lib->records, idx);
@@ -457,7 +457,7 @@ bool tpcs4_save_library(const wchar_t* path_utf16, PasswordLibrary* lib, const u
 
     DWORD dwWrite = 0;
 
-    // FIXME£º´óÎÄ¼ş³¤¶ÈÒç³ö
+    // FIXMEï¼šå¤§æ–‡ä»¶é•¿åº¦æº¢å‡º
     if (!WriteFile(hFile.get(), tpcs2.get(), tpcs2_size, &dwWrite, 0) || dwWrite != tpcs2_size) {
         return false;
     }
@@ -532,6 +532,6 @@ PasswordLibrary* tpcs4_read_library_kdf(const wchar_t* path_utf16, uint8_t* out_
     }
 
     uint8_t* ptr = der.get();
-    // FIXME£ºÕâÀïÒ²ÓĞÒç³öÎÊÌâ£¬ÕâOpenSSLµÄÎÊÌâÈÃÎÒÔõÃ´ĞŞ°¡£¨º¹
+    // FIXMEï¼šè¿™é‡Œä¹Ÿæœ‰æº¢å‡ºé—®é¢˜ï¼Œè¿™OpenSSLçš„é—®é¢˜è®©æˆ‘æ€ä¹ˆä¿®å•Šï¼ˆæ±—
     return d2i_PasswordLibrary(0, (const unsigned char**)&ptr, (long)der_size);
 }

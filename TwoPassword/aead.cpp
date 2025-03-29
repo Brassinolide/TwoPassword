@@ -1,4 +1,4 @@
-#include <openssl/evp.h>
+﻿#include <openssl/evp.h>
 #include <openssl/rand.h>
 #include "aead.h"
 #include "literals.h"

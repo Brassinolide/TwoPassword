@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 #include <vector>
 #include <chrono>
 #include <string>
@@ -31,13 +31,13 @@ constexpr size_t least_tpcs1_size = sizeof_iv + sizeof_authtag + sizeof_tpcs1_he
 struct tpcs1_header {
     uint8_t magic[3];
     uint8_t version;
-    // chacha20µÄiv
+    // chacha20çš„iv
     uint8_t chacha20_iv[12];
-    // poly1305µÄÑéÖ¤±êÇ©
+    // poly1305çš„éªŒè¯æ ‡ç­¾
     uint8_t poly1305_authtag[16];
-    // Êı¾İ³¤¶È
+    // æ•°æ®é•¿åº¦
     uint64_t data_size;
-    // chacha20¼ÓÃÜºóµÄÊı¾İ
+    // chacha20åŠ å¯†åçš„æ•°æ®
     // uint8_t chacha20_encrypted_data[data_size];
 };
 
@@ -45,15 +45,15 @@ constexpr size_t sizeof_tpcs2_header = 48;
 constexpr size_t least_tpcs2_size = sizeof_tpcs2_header + least_tpcs1_size;
 struct tpcs2_header {
     uint8_t salt[48];
-    // ¼ÓÃÜºóµÄTPCS1Êı¾İ
+    // åŠ å¯†åçš„TPCS1æ•°æ®
     // ...
 };
 
 constexpr size_t sizeof_tpcs3_encoded_char = 8;
 struct tpcs3_encoded_char {
-    // ´Ó0¿ªÊ¼µİÔöµÄID£¬Òç³öÁËÎŞËùÎ½
+    // ä»0å¼€å§‹é€’å¢çš„IDï¼Œæº¢å‡ºäº†æ— æ‰€è°“
     uint32_t id;
-    // ×Ö·ûµÄutf32±àÂë£¬´ÓĞ¡¶Ë¿ªÊ¼£¬´ó¶ËĞ¡¶Ë½»ÌæÂÖ»»
+    // å­—ç¬¦çš„utf32ç¼–ç ï¼Œä»å°ç«¯å¼€å§‹ï¼Œå¤§ç«¯å°ç«¯äº¤æ›¿è½®æ¢
     uint32_t utf32;
 };
 
@@ -68,7 +68,7 @@ static_assert(
     check_sizeof<tpcs1_header, sizeof_tpcs1_header>() &&
     check_sizeof<tpcs2_header, sizeof_tpcs2_header>() &&
     check_sizeof<tpcs3_encoded_char, sizeof_tpcs3_encoded_char>()
-    , "±àÒëÆÚ¼ì²é£º½á¹¹Ìå´óĞ¡ÓëÔ¤ÆÚ²»Æ¥Åä");
+    , "ç¼–è¯‘æœŸæ£€æŸ¥ï¼šç»“æ„ä½“å¤§å°ä¸é¢„æœŸä¸åŒ¹é…");
 
 
 size_t tpcs1_encrypt(byteptr& out, const uint8_t* in_data, size_t data_size, const uint8_t* in_key/*[64]*/);
@@ -224,7 +224,7 @@ public:
 
 private:
     const stack_st_PasswordRecord* _record;
-    // FIXME£ºÍ¬ÑùµÄÒç³öÎÊÌâ
+    // FIXMEï¼šåŒæ ·çš„æº¢å‡ºé—®é¢˜
     int _pos, _totalsize;
 };
 
